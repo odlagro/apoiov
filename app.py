@@ -1,11 +1,11 @@
-# app.py (v8 - nome do sistema + frete reset)
+# app.py (v9 - fotos + ajustes)
 import os, re, json
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlparse, parse_qs
 import pandas as pd
+import requests
 
-from flask import Flask, render_template, request, flash
-from werkzeug.utils import secure_filename
+from flask import Flask, render_template, request, flash, Response
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
@@ -71,6 +71,21 @@ def try_header_scan(reader_func):
             return df
     return None
 
+def _extract_image_url(cell_val: str) -> str | None:
+    if not cell_val: 
+        return None
+    s = str(cell_val).strip()
+    if s == "" or s.lower() == "nan":
+        return None
+    # Parse =IMAGE("...") forms
+    m = re.search(r'(?i)\bimage\s*\(\s*"([^"]+)"', s)
+    if m:
+        return m.group(1)
+    # Otherwise, if it looks like an URL return as-is
+    if s.startswith("http://") or s.startswith("https://"):
+        return s
+    return None
+
 def load_sheet_exact(sheet_url: str):
     # lê CSV primeiro (mais robusto), depois XLSX
     csv_u, xlsx_u = to_gsheet_export(sheet_url.strip())
@@ -96,6 +111,7 @@ def load_sheet_exact(sheet_url: str):
 
     # normalizar nomes
     rename_map = {}
+    foto_key = None
     for c in df.columns:
         u = str(c).strip().upper()
         if u == "MODELO":
@@ -104,9 +120,12 @@ def load_sheet_exact(sheet_url: str):
             rename_map[c] = "PrecoCartao"
         if u in ("A VISTA","À VISTA","AVISTA"):
             rename_map[c] = "AvistaSheet"
+        if u == "FOTO":
+            rename_map[c] = "Foto"
+            foto_key = "Foto"
     df = df.rename(columns=rename_map)
 
-    # fallback final
+    # fallback final para Produto/Cartão
     if "Produto" not in df.columns or "PrecoCartao" not in df.columns:
         prod_col = None; cart_col = None
         for c in df.columns:
@@ -125,8 +144,35 @@ def load_sheet_exact(sheet_url: str):
     df = df[df["Produto"].astype(str).str.strip().str.upper().ne("CÓDIGO")]
     df = df[df["Produto"].astype(str).str.strip().str.len() > 0]
 
-    rows = [{"produto": str(r["Produto"]).strip(), "preco_cartao": float(r["PrecoCartaoNum"])} for _, r in df.iterrows()]
+    # extrair foto se houver coluna
+    foto_vals = None
+    if "Foto" in df.columns:
+        foto_vals = df["Foto"]
+
+    rows = []
+    for _, r in df.iterrows():
+        foto_url = None
+        if foto_vals is not None:
+            foto_url = _extract_image_url(r.get("Foto", ""))
+        rows.append({
+            "produto": str(r["Produto"]).strip(),
+            "preco_cartao": float(r["PrecoCartaoNum"]),
+            "foto": foto_url
+        })
     return rows
+
+@app.route("/photo")
+def photo():
+    url = request.args.get("u", "").strip()
+    if not url:
+        return Response("missing url", status=400)
+    try:
+        # proxy to avoid CORS issues, small timeout
+        r = requests.get(url, timeout=10)
+        content_type = r.headers.get("Content-Type", "image/jpeg")
+        return Response(r.content, mimetype=content_type)
+    except Exception as e:
+        return Response("error fetching image", status=502)
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -137,6 +183,8 @@ def home():
         desconto_default = DEFAULT_DESCONTO
 
     rows = []
+    selected_foto = None
+
     if request.method == "POST":
         action = request.form.get("action")
         if action == "carregar":
@@ -158,6 +206,7 @@ def home():
             data = json.loads(request.form.get("item_json", "{}"))
             produto = str(data.get("produto", "Produto"))
             preco_cartao = Decimal(str(data.get("preco_cartao", "0")))
+            selected_foto = data.get("foto") or None
             frete = Decimal(request.form.get("frete", "0").replace(",", "."))
 
             desconto = Decimal(str(desconto_default)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -184,13 +233,14 @@ def home():
             except Exception:
                 rows = []
 
-            # Frete deve voltar para zero após calcular
+            # Frete volta a zero após calcular
             return render_template("index.html",
                                    sheet_url=DEFAULT_SHEET_URL,
                                    desconto_padrao=float(desconto),
                                    rows=rows,
                                    generated_text=msg,
-                                   frete=0.0)
+                                   frete=0.0,
+                                   selected_foto=selected_foto)
 
     # GET (carregar produtos automaticamente)
     try:

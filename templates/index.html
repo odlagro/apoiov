@@ -11,7 +11,8 @@
     .row { display: grid; grid-template-columns: 28px 1fr 140px 140px 140px; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid #333; }
     .row.header { font-weight: 600; }
     .copy-btn { display:flex; align-items:center; gap:8px; }
-    details summary { cursor: pointer; }
+    .foto { max-width: 420px; border-radius: 10px; border: 1px solid #1f2937; display:block; }
+    .btnrow { display:flex; gap:10px; margin-top:8px; }
   </style>
 </head>
 <body>
@@ -92,9 +93,24 @@
 
     {% if generated_text %}
       <div class="card">
+        <h2>Foto do produto</h2>
+        {% if selected_foto %}
+          <img id="prodFoto" class="foto" src="{{ url_for('photo') }}?u={{ selected_foto|urlencode }}" alt="Foto do produto">
+          <div class="btnrow">
+            <button type="button" onclick="copyImage('prodFoto')">📋 Copiar imagem</button>
+            <a href="{{ url_for('photo') }}?u={{ selected_foto|urlencode }}" download="produto.jpg">
+              <button type="button">⬇️ Baixar</button>
+            </a>
+          </div>
+        {% else %}
+          <p>Sem foto</p>
+        {% endif %}
+      </div>
+
+      <div class="card">
         <h2>Texto gerado</h2>
         <textarea readonly id="texto">{{ generated_text }}</textarea>
-        <button onclick="copyText()" class="copy-btn">📋 Copiar</button>
+        <button onclick="copyText()" class="copy-btn">📋 Copiar texto</button>
       </div>
     {% endif %}
 
@@ -107,6 +123,18 @@
       ta.setSelectionRange(0, 99999);
       document.execCommand('copy');
       alert('Texto copiado!');
+    }
+
+    async function copyImage(imgId) {
+      const img = document.getElementById(imgId);
+      try {
+        const resp = await fetch(img.src);
+        const blob = await resp.blob();
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        alert('Imagem copiada!');
+      } catch (e) {
+        alert('Não foi possível copiar a imagem automaticamente. Use o botão "Baixar" e cole manualmente.');
+      }
     }
   </script>
 </body>

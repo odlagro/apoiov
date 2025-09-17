@@ -98,10 +98,10 @@
       <h2>Foto do produto</h2>
       <div id="fotoArea">
         {% if selected_foto %}
-          <img id="prodFoto" class="foto" src="{{ url_for('photo') }}?u={{ selected_foto|urlencode }}" alt="Foto do produto">
+          <img id="prodFoto" class="foto" src="{{ selected_foto }}" alt="Foto do produto">
           <div class="btnrow">
             <button type="button" onclick="copyImage('prodFoto')">📋 Copiar imagem</button>
-            <a id="downloadLink" href="{{ url_for('photo') }}?u={{ selected_foto|urlencode }}" download="produto.jpg">
+            <a id="downloadLink" href="{{ selected_foto }}" download="produto.jpg">
               <button type="button">⬇️ Baixar</button>
             </a>
           </div>
@@ -137,26 +137,24 @@
     async function copyImage(imgId) {
       const img = document.getElementById(imgId);
       try {
-        const resp = await fetch(img.src);
+        const resp = await fetch(img.src, {mode: 'no-cors'}); // tentativa simples
         const blob = await resp.blob();
         await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
         alert('Imagem copiada!');
       } catch (e) {
-        alert('Não foi possível copiar a imagem automaticamente. Use o botão "Baixar" e cole manualmente.');
+        alert('Caso não copie automaticamente por política do site da imagem, use "Baixar" e cole manualmente no WhatsApp.');
       }
     }
 
-    // Atualiza foto ao trocar o produto
     function setPhoto(url) {
       const area = document.getElementById('fotoArea');
       if (!area) return;
       if (url) {
-        const encoded = encodeURIComponent(url);
         area.innerHTML = `
-          <img id="prodFoto" class="foto" src="/photo?u=${encoded}" alt="Foto do produto">
+          <img id="prodFoto" class="foto" src="${url}" alt="Foto do produto">
           <div class="btnrow">
             <button type="button" onclick="copyImage('prodFoto')">📋 Copiar imagem</button>
-            <a id="downloadLink" href="/photo?u=${encoded}" download="produto.jpg">
+            <a id="downloadLink" href="${url}" download="produto.jpg">
               <button type="button">⬇️ Baixar</button>
             </a>
           </div>`;

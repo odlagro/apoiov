@@ -1,11 +1,10 @@
-# app.py (v12 - robust header scan + link column I)
+# app.py (v13 - imagem com URL exato da planilha)
 import os, re, json
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from urllib.parse import urlparse, parse_qs
 import pandas as pd
-import requests
 
-from flask import Flask, render_template, request, flash, Response
+from flask import Flask, render_template, request, flash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
@@ -54,7 +53,6 @@ def parse_price(v):
 
 def try_header_scan(reader_func):
     raw = reader_func(header=None)
-    # scan up to 50 rows to be safer
     max_rows = min(50, len(raw))
     for i in range(max_rows):
         row = raw.iloc[i].fillna("").astype(str).str.strip().str.upper().tolist()
@@ -90,10 +88,8 @@ def _read_df(csv_u, xlsx_u):
     return None, errors
 
 def normalize_and_extract(df, csv_u=None, xlsx_u=None):
-    # Attempt to normalize directly
     cols_upper = [str(c).strip().upper() for c in df.columns]
     if not ("MODELO" in cols_upper and (("CARTÃO" in cols_upper) or ("CARTAO" in cols_upper))):
-        # Try scan with XLSX then CSV, both header=None
         scanned = None
         if xlsx_u:
             try:
@@ -108,7 +104,6 @@ def normalize_and_extract(df, csv_u=None, xlsx_u=None):
         if scanned is not None:
             df = scanned
 
-    # rename columns
     rename_map = {}
     for c in df.columns:
         u = str(c).strip().upper()
@@ -124,14 +119,12 @@ def normalize_and_extract(df, csv_u=None, xlsx_u=None):
             rename_map[c] = "FotoFallback"
     df = df.rename(columns=rename_map)
 
-    # If still no FotoLink but at least 9 columns, assume I
     if "FotoLink" not in df.columns and len(df.columns) >= 9:
         i_col_name = df.columns[8]
         df = df.rename(columns={i_col_name: "FotoLink"})
 
-    # If columns are still not normalized, raise with hint
     if "Produto" not in df.columns or "PrecoCartao" not in df.columns:
-        raise ValueError("Não encontrei as colunas MODELO e CARTÃO na planilha. Confirme os títulos e a aba correta (gid).")
+        raise ValueError("Não encontrei as colunas MODELO e CARTÃO na planilha.")
 
     return df
 
@@ -139,7 +132,7 @@ def load_sheet_exact(sheet_url: str):
     csv_u, xlsx_u = to_gsheet_export(sheet_url.strip())
     df, errs = _read_df(csv_u, xlsx_u)
     if df is None:
-        raise ValueError("Falha ao ler a planilha online. Verifique o compartilhamento.\n" + "\n".join(errs[-2:]))
+        raise ValueError("Falha ao ler a planilha online. " + "\n".join(errs[-2:]))
 
     df = normalize_and_extract(df, csv_u=csv_u, xlsx_u=xlsx_u)
 
@@ -161,20 +154,8 @@ def load_sheet_exact(sheet_url: str):
             "foto": foto_url
         })
     if not rows:
-        raise ValueError("Achei a planilha, mas não consegui interpretar os preços do cartão. Confira se a coluna CARTÃO tem valores.")
+        raise ValueError("Achei a planilha, mas não consegui interpretar os preços do cartão.")
     return rows
-
-@app.route("/photo")
-def photo():
-    url = request.args.get("u", "").strip()
-    if not url:
-        return Response("missing url", status=400)
-    try:
-        r = requests.get(url, timeout=10)
-        content_type = r.headers.get("Content-Type", "image/jpeg")
-        return Response(r.content, mimetype=content_type)
-    except Exception:
-        return Response("error fetching image", status=502)
 
 def parse_decimal_or_zero(s: str) -> Decimal:
     try:

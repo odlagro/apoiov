@@ -28,7 +28,7 @@
       {% endif %}
     {% endwith %}
 
-    <details class="card" {% if not rows %}open{% endif %}>
+    <details class="card">
       <summary><b>Configurações</b> (link fixo da planilha e % desconto padrão)</summary>
       <form action="{{ url_for('home') }}" method="POST" enctype="multipart/form-data" style="margin-top:12px;">
         <input type="hidden" name="action" value="carregar">
@@ -41,7 +41,7 @@
             <input type="number" step="0.01" id="desconto_padrao" name="desconto_padrao" value="{{ '%.2f'|format(desconto_padrao or 12.0) }}">
           </div>
           <div style="display:flex; align-items:flex-end;">
-            <button type="submit">Carregar produtos</button>
+            <button type="submit">Recarregar produtos</button>
           </div>
         </div>
       </form>
@@ -85,6 +85,8 @@
 
         <button type="submit" class="copy-btn">CALCULAR</button>
       </form>
+    {% else %}
+      <div class="card"><p>Nenhum produto foi carregado da planilha. Verifique o link ou clique em "Recarregar produtos" nas Configurações.</p></div>
     {% endif %}
 
     {% if generated_text %}

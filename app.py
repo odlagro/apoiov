@@ -1,4 +1,4 @@
-# app.py (v6 - link fixo)
+# app.py (v7 - link fixo + melhorias)
 import os, re, json
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlparse, parse_qs
@@ -44,7 +44,6 @@ def brl(value: Decimal) -> str:
         value = Decimal(str(value))
     value = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     int_part, frac_part = f"{value:.2f}".split(".")
-    # separar milhares com '.' e decimais com ','
     int_part_with_sep = ""
     while len(int_part) > 3:
         int_part_with_sep = "." + int_part[-3:] + int_part_with_sep
@@ -167,15 +166,16 @@ def home():
             avista = (preco_cartao * (Decimal("100") - desconto) / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             promo_pix = (avista + frete).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+            desconto_str = f"{desconto:.2f}"
             lines = [
-                "*VALOR JÁ INCLUSO O FRETE *",
-                f"*{produto.upper()} *",
+                "*VALOR JÁ INCLUSO O FRETE*",
+                f"*{produto.upper()}*",
                 f"{brl(total_cartao)}",
                 f"até 10x de {brl(parcela_10x)} sem juros",
                 "",
                 "ou",
                 "",
-                f"PROMOÇÃO: {brl(promo_pix)} no pix já com {desconto}% de desconto **"
+                f"*PROMOÇÃO: {brl(promo_pix)} no pix já com {desconto_str}% de desconto*"
             ]
             msg = "\n".join(lines)
 
@@ -191,7 +191,13 @@ def home():
                                    generated_text=msg,
                                    frete=float(frete))
 
-    # GET
+    # GET (carregar produtos automaticamente)
+    try:
+        rows = load_sheet_exact(DEFAULT_SHEET_URL)
+    except Exception as e:
+        flash(str(e), "error")
+        rows = []
+
     return render_template("index.html", sheet_url=DEFAULT_SHEET_URL, desconto_padrao=desconto_default, rows=rows)
 
 if __name__ == "__main__":

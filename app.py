@@ -1,4 +1,4 @@
-# app.py (v10 - foto on select + frete zero badge)
+# app.py (v11 - foto via coluna I (LINK) + aviso de frete no texto)
 import os, re, json
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from urllib.parse import urlparse, parse_qs
@@ -9,15 +9,11 @@ from flask import Flask, render_template, request, flash, Response
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ---- CONFIG: link fixo da planilha ----
 DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Ycsc6ksvaO5EwOGq_w-N8awTKUyuo7awwu2IzRNfLVg/edit?pli=1&gid=0#gid=0"
 DEFAULT_DESCONTO = float(os.environ.get("DEFAULT_DESCONTO", 12.0))
 # ---------------------------------------
-
-ALLOWED_EXTENSIONS = {"csv", "xlsx", "xls"}
 
 def to_gsheet_export(url: str):
     if not url:
@@ -34,7 +30,6 @@ def to_gsheet_export(url: str):
         if m:
             doc_id = m.group(1)
             base = f"https://docs.google.com/spreadsheets/d/{doc_id}/export"
-            # Prefer XLSX first for FOTO column (it preserves IMAGE formulas)
             xlsx_url = f"{base}?format=xlsx" + (f"&gid={gid}" if gid else "")
             csv_url  = f"{base}?format=csv"  + (f"&gid={gid}" if gid else "")
             return csv_url, xlsx_url
@@ -61,23 +56,13 @@ def parse_price(v):
     try: return float(s)
     except: return None
 
-def try_header_scan(reader_func):
-    raw = reader_func(header=None)
-    for i in range(min(20, len(raw))):
-        row = raw.iloc[i].fillna("").astype(str).str.strip().str.upper().tolist()
-        if "MODELO" in row and ("CARTÃO" in row or "CARTAO" in row):
-            headers = raw.iloc[i].tolist()
-            df = raw.iloc[i+1:].copy()
-            df.columns = headers
-            return df
-    return None
-
 def _extract_image_url(cell_val: str):
     if not cell_val: 
         return None
     s = str(cell_val).strip()
     if s == "" or s.lower() == "nan":
         return None
+    # Accept direct links or =IMAGE("...")
     m = re.search(r'(?i)\bimage\s*\(\s*"([^"]+)"', s)
     if m:
         return m.group(1)
@@ -103,14 +88,7 @@ def load_sheet_exact(sheet_url: str):
     if df is None:
         raise ValueError("Falha ao ler a planilha online. Verifique o compartilhamento.\n" + "\n".join(errs[-2:]))
 
-    # tentar detectar cabeçalho se necessário (para CSV; XLSX normalmente vem ok)
-    cols_upper = [str(c).strip().upper() for c in df.columns]
-    if not ("MODELO" in cols_upper and (("CARTÃO" in cols_upper) or ("CARTAO" in cols_upper))):
-        scanned = try_header_scan(lambda **kw: pd.read_csv(csv_u, **kw))
-        if scanned is not None:
-            df = scanned
-
-    # normalizar nomes, incluindo FOTO
+    # Normalize columns (focus on MODELO, CARTÃO, and new LINK column (I))
     rename_map = {}
     for c in df.columns:
         u = str(c).strip().upper()
@@ -120,9 +98,18 @@ def load_sheet_exact(sheet_url: str):
             rename_map[c] = "PrecoCartao"
         if u in ("A VISTA","À VISTA","AVISTA"):
             rename_map[c] = "AvistaSheet"
-        if u == "FOTO":
-            rename_map[c] = "Foto"
+        # New: use LINK (coluna I) as the image URL
+        if u in ("LINK","URL","URL FOTO","FOTO LINK","IMAGEM","IMAGE URL"):
+            rename_map[c] = "FotoLink"
+        # Keep FOTO as a very last fallback only
+        if u == "FOTO" and "FotoLink" not in rename_map.values():
+            rename_map[c] = "FotoFallback"
     df = df.rename(columns=rename_map)
+
+    # If there is no FotoLink but there are at least 9 columns (I = index 8), use that column as FotoLink (user asked to use col I)
+    if "FotoLink" not in df.columns and len(df.columns) >= 9:
+        i_col_name = df.columns[8]
+        df = df.rename(columns={i_col_name: "FotoLink"})
 
     if "Produto" not in df.columns or "PrecoCartao" not in df.columns:
         prod_col = None; cart_col = None
@@ -135,18 +122,19 @@ def load_sheet_exact(sheet_url: str):
         else:
             raise ValueError("Não encontrei MODELO (Produto) e CARTÃO (Preço cartão).")
 
-    # converter e filtrar
     df["PrecoCartaoNum"] = df["PrecoCartao"].apply(parse_price)
     df = df.dropna(subset=["PrecoCartaoNum"])
     df = df[df["Produto"].astype(str).str.strip().str.upper().ne("MODELO")]
     df = df[df["Produto"].astype(str).str.strip().str.upper().ne("CÓDIGO")]
     df = df[df["Produto"].astype(str).str.strip().str.len() > 0]
 
-    # foto
-    has_foto = "Foto" in df.columns
     rows = []
     for _, r in df.iterrows():
-        foto_url = _extract_image_url(r["Foto"]) if has_foto else None
+        foto_val = r.get("FotoLink", None)
+        # If FotoLink empty, optionally fallback to FotoFallback (old column H) just in case
+        if (foto_val is None or str(foto_val).strip() == "") and "FotoFallback" in df.columns:
+            foto_val = r.get("FotoFallback", None)
+        foto_url = _extract_image_url(foto_val) if foto_val is not None else None
         rows.append({
             "produto": str(r["Produto"]).strip(),
             "preco_cartao": float(r["PrecoCartaoNum"]),
@@ -163,7 +151,7 @@ def photo():
         r = requests.get(url, timeout=10)
         content_type = r.headers.get("Content-Type", "image/jpeg")
         return Response(r.content, mimetype=content_type)
-    except Exception as e:
+    except Exception:
         return Response("error fetching image", status=502)
 
 def parse_decimal_or_zero(s: str) -> Decimal:
@@ -203,7 +191,6 @@ def home():
                     flash("Nenhum produto encontrado. Verifique a planilha.", "error")
             except Exception as e:
                 flash(str(e), "error")
-            # primeira foto padrão
             selected_foto = rows[0].get("foto") if rows else None
             return render_template("index.html", sheet_url=DEFAULT_SHEET_URL, desconto_padrao=desconto_default, rows=rows, selected_foto=selected_foto, frete_zero_flag=frete_zero_flag)
 
@@ -246,11 +233,11 @@ def home():
                                    desconto_padrao=float(desconto),
                                    rows=rows,
                                    generated_text=msg,
-                                   frete=0.0,  # reset field display
+                                   frete=0.0,
                                    selected_foto=selected_foto,
                                    frete_zero_flag=frete_zero_flag)
 
-    # GET (carregar produtos automaticamente + foto do primeiro)
+    # GET
     try:
         rows = load_sheet_exact(DEFAULT_SHEET_URL)
     except Exception as e:

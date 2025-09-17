@@ -88,7 +88,6 @@
 
         <div style="display:flex; gap:12px; align-items:center; margin-top:10px;">
           <button type="submit" class="copy-btn">CALCULAR</button>
-          <span class="badge" id="freteZeroMsg" style="display: none;">Frete informado: R$ 0,00</span>
         </div>
       </form>
     {% else %}
@@ -114,7 +113,10 @@
 
     {% if generated_text %}
       <div class="card">
-        <h2>Texto gerado</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h2>Texto gerado</h2>
+          {% if frete_zero_flag %}<span class="badge">Frete informado: R$ 0,00</span>{% endif %}
+        </div>
         <textarea readonly id="texto">{{ generated_text }}</textarea>
         <button onclick="copyText()" class="copy-btn">📋 Copiar texto</button>
       </div>
@@ -143,23 +145,6 @@
         alert('Não foi possível copiar a imagem automaticamente. Use o botão "Baixar" e cole manualmente.');
       }
     }
-
-    // Mostrar/ocultar badge de frete zero
-    function updateFreteBadge() {
-      const el = document.getElementById('frete');
-      const badge = document.getElementById('freteZeroMsg');
-      if (!el || !badge) return;
-      const v = (el.value || '').trim().replace('.', '').replace(',', '.');
-      if (v === '' || Number(v) === 0) {
-        badge.style.display = 'inline-block';
-      } else {
-        badge.style.display = 'none';
-      }
-    }
-    document.addEventListener('input', (e) => {
-      if (e.target && e.target.id === 'frete') updateFreteBadge();
-    });
-    document.addEventListener('DOMContentLoaded', updateFreteBadge);
 
     // Atualizar a foto assim que selecionar um produto
     function setPhoto(url) {

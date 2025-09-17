@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gerar Texto</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    textarea { width: 100%; min-height: 200px; font-size: 16px; }
+    .rows { max-height: 360px; overflow: auto; }
+    .row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid #333; }
+    .row form { display: contents; }
+    .row button { white-space: nowrap; }
+    .pill { background: #1f2937; padding: 6px 10px; border-radius: 999px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧮 Selecione o produto e gere o texto</h1>
+
+    <div class="card">
+      <div class="grid">
+        <div class="pill">Frete atual: R$ {{ '%.2f'|format(frete) }}</div>
+        <div class="pill">Desconto à vista: {{ '%.2f'|format(desconto_percent) }}%</div>
+      </div>
+    </div>
+
+    {% if generated_text %}
+      <div class="card">
+        <h2>Texto gerado (copiar e colar no WhatsApp):</h2>
+        <textarea readonly id="texto">{{ generated_text }}</textarea>
+        <button onclick="copyText()">Copiar texto</button>
+      </div>
+    {% endif %}
+
+    <div class="card rows">
+      <div class="row" style="font-weight: 600;">
+        <div>Produto</div>
+        <div>Preço</div>
+        <div>Ação</div>
+      </div>
+      {% for r in rows %}
+        <div class="row">
+          <div>{{ r['produto'] }}</div>
+          <div>R$ {{ '%.2f'|format(r['preco']) }}</div>
+          <form action="{{ url_for('gerar_texto') }}" method="POST">
+            <input type="hidden" name="payload" value='{{ r | tojson }}' />
+            <input type="hidden" name="frete" value="{{ frete }}"/>
+            <input type="hidden" name="desconto_percent" value="{{ desconto_percent }}"/>
+            <input type="hidden" name="rows_json" value='{{ rows | tojson }}' />
+            <button type="submit">Gerar texto</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+
+    <p><a href="{{ url_for('index') }}">⬅️ Voltar</a></p>
+  </div>
+
+  <script>
+    function copyText() {
+      const ta = document.getElementById('texto');
+      ta.select();
+      ta.setSelectionRange(0, 99999);
+      document.execCommand('copy');
+      alert('Texto copiado!');
+    }
+  </script>
+</body>
+</html>

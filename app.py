@@ -1,4 +1,4 @@
-# app.py (v7 - link fixo + melhorias)
+# app.py (v8 - nome do sistema + frete reset)
 import os, re, json
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlparse, parse_qs
@@ -184,12 +184,13 @@ def home():
             except Exception:
                 rows = []
 
+            # Frete deve voltar para zero após calcular
             return render_template("index.html",
                                    sheet_url=DEFAULT_SHEET_URL,
                                    desconto_padrao=float(desconto),
                                    rows=rows,
                                    generated_text=msg,
-                                   frete=float(frete))
+                                   frete=0.0)
 
     # GET (carregar produtos automaticamente)
     try:

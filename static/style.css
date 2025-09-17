@@ -17,10 +17,10 @@ input[type="url"], input[type="file"], input[type="text"], input[type="number"] 
 button { padding:10px 14px; background:var(--primary); color:#001229; border:none; border-radius:12px; cursor:pointer; font-weight:600; margin-top:8px; }
 button:hover { filter: brightness(1.05); }
 .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.divider { text-align:center; color:var(--muted); margin:8px 0; }
 .flash p { padding:8px 12px; border-radius:8px; }
 .flash .error { background:#3f1d1d; color:#ffb4b4; border:1px solid #6b1b1b; }
 .row { background: #0d1320; }
 details summary { list-style: none; }
 details summary::-webkit-details-marker { display:none; }
 .foto { background:#0f172a; }
+.badge { box-shadow: 0 0 0 1px rgba(0,0,0,.05) inset; }

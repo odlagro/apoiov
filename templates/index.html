@@ -13,6 +13,7 @@
     .copy-btn { display:flex; align-items:center; gap:8px; }
     .foto { max-width: 420px; border-radius: 10px; border: 1px solid #1f2937; display:block; }
     .btnrow { display:flex; gap:10px; margin-top:8px; }
+    .badge { background:#FDE68A; color:#7C2D12; padding:6px 10px; border-radius: 10px; border:1px solid #FBBF24; font-weight:600; }
   </style>
 </head>
 <body>
@@ -50,7 +51,7 @@
     </details>
 
     {% if rows and rows|length > 0 %}
-      <form action="{{ url_for('home') }}" method="POST" class="card">
+      <form action="{{ url_for('home') }}" method="POST" class="card" id="calcForm">
         <input type="hidden" name="action" value="calcular">
         <div class="row header">
           <div></div>
@@ -59,7 +60,7 @@
           <div>À vista (padrão)</div>
           <div>10x s/ juros</div>
         </div>
-        <div class="rows">
+        <div class="rows" id="rows">
           {% for r in rows %}
             {% set avista = (r['preco_cartao'] * (1 - (desconto_padrao or 12.0)/100.0)) %}
             <div class="row">
@@ -74,7 +75,7 @@
           {% endfor %}
         </div>
 
-        <div class="grid" style="margin-top:12px;">
+        <div class="grid" style="margin-top:12px; align-items:end;">
           <div>
             <label for="frete">Frete (R$)</label>
             <input type="text" id="frete" name="frete" placeholder="0,00" value="{{ '%.2f'|format(frete or 0) }}">
@@ -85,20 +86,23 @@
           </div>
         </div>
 
-        <button type="submit" class="copy-btn">CALCULAR</button>
+        <div style="display:flex; gap:12px; align-items:center; margin-top:10px;">
+          <button type="submit" class="copy-btn">CALCULAR</button>
+          <span class="badge" id="freteZeroMsg" style="display: none;">Frete informado: R$ 0,00</span>
+        </div>
       </form>
     {% else %}
       <div class="card"><p>Nenhum produto foi carregado da planilha. Verifique o link ou clique em "Recarregar produtos" nas Configurações.</p></div>
     {% endif %}
 
-    {% if generated_text %}
-      <div class="card">
-        <h2>Foto do produto</h2>
+    <div class="card">
+      <h2>Foto do produto</h2>
+      <div id="fotoArea">
         {% if selected_foto %}
           <img id="prodFoto" class="foto" src="{{ url_for('photo') }}?u={{ selected_foto|urlencode }}" alt="Foto do produto">
           <div class="btnrow">
             <button type="button" onclick="copyImage('prodFoto')">📋 Copiar imagem</button>
-            <a href="{{ url_for('photo') }}?u={{ selected_foto|urlencode }}" download="produto.jpg">
+            <a id="downloadLink" href="{{ url_for('photo') }}?u={{ selected_foto|urlencode }}" download="produto.jpg">
               <button type="button">⬇️ Baixar</button>
             </a>
           </div>
@@ -106,7 +110,9 @@
           <p>Sem foto</p>
         {% endif %}
       </div>
+    </div>
 
+    {% if generated_text %}
       <div class="card">
         <h2>Texto gerado</h2>
         <textarea readonly id="texto">{{ generated_text }}</textarea>
@@ -119,6 +125,7 @@
   <script>
     function copyText() {
       const ta = document.getElementById('texto');
+      if (!ta) return;
       ta.select();
       ta.setSelectionRange(0, 99999);
       document.execCommand('copy');
@@ -136,6 +143,50 @@
         alert('Não foi possível copiar a imagem automaticamente. Use o botão "Baixar" e cole manualmente.');
       }
     }
+
+    // Mostrar/ocultar badge de frete zero
+    function updateFreteBadge() {
+      const el = document.getElementById('frete');
+      const badge = document.getElementById('freteZeroMsg');
+      if (!el || !badge) return;
+      const v = (el.value || '').trim().replace('.', '').replace(',', '.');
+      if (v === '' || Number(v) === 0) {
+        badge.style.display = 'inline-block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    document.addEventListener('input', (e) => {
+      if (e.target && e.target.id === 'frete') updateFreteBadge();
+    });
+    document.addEventListener('DOMContentLoaded', updateFreteBadge);
+
+    // Atualizar a foto assim que selecionar um produto
+    function setPhoto(url) {
+      const area = document.getElementById('fotoArea');
+      if (!area) return;
+      if (url) {
+        const encoded = encodeURIComponent(url);
+        area.innerHTML = `
+          <img id="prodFoto" class="foto" src="/photo?u=${encoded}" alt="Foto do produto">
+          <div class="btnrow">
+            <button type="button" onclick="copyImage('prodFoto')">📋 Copiar imagem</button>
+            <a id="downloadLink" href="/photo?u=${encoded}" download="produto.jpg">
+              <button type="button">⬇️ Baixar</button>
+            </a>
+          </div>`;
+      } else {
+        area.innerHTML = "<p>Sem foto</p>";
+      }
+    }
+    document.addEventListener('change', (e) => {
+      if (e.target && e.target.name === 'item_json') {
+        try {
+          const data = JSON.parse(e.target.value);
+          setPhoto(data.foto || null);
+        } catch {}
+      }
+    });
   </script>
 </body>
 </html>

@@ -1,0 +1,6 @@
+/* static/css/app.css */
+:root{--bs-body-bg:#0b0f12;}
+.table tbody tr td, .table thead th{vertical-align:middle;}
+textarea{white-space:pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+img{background:#111;}
+table#tblResultados textarea{min-height: 220px;}

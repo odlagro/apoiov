@@ -1,175 +1,207 @@
 <!doctype html>
-<html lang="pt-br">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Apoio de Vendas ODL AGRO</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <style>
-    textarea { width: 100%; min-height: 220px; font-size: 16px; }
-    .rows { max-height: 360px; overflow: auto; }
-    .row { display: grid; grid-template-columns: 28px 1fr 140px 140px 140px; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid #333; }
-    .row.header { font-weight: 600; }
-    .copy-btn { display:flex; align-items:center; gap:8px; }
-    .foto { max-width: 420px; border-radius: 10px; border: 1px solid #1f2937; display:block; }
-    .btnrow { display:flex; gap:10px; margin-top:8px; }
-    .badge { background:#FDE68A; color:#7C2D12; padding:6px 10px; border-radius: 10px; border:1px solid #FBBF24; font-weight:600; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>📦 Apoio de Vendas ODL AGRO</h1>
-    <p style="margin-top:-8px;color:#9ca3af">Selecione o produto, informe o frete e gere o texto para WhatsApp.</p>
+<html lang="pt-br" data-bs-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Apoio de Vendas ODL AGRO</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/app.css">
+  </head>
+  <body class="bg-dark text-light">
+    <div class="container py-4">
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div class="flash">
-        {% for category, message in messages %}
-          <p class="{{ category }}">{{ message }}</p>
-        {% endfor %}
+      <div class="row g-2 align-items-end mb-3">
+        <div class="col-12 col-md-3">
+          <label class="form-label">UF</label>
+          <select id="ufSelect" class="form-select form-select-sm"></select>
+          <small id="ufMsg" class="text-warning"></small>
         </div>
-      {% endif %}
-    {% endwith %}
-
-    <details class="card">
-      <summary><b>Configurações</b> (link fixo da planilha e % desconto padrão)</summary>
-      <form action="{{ url_for('home') }}" method="POST" enctype="multipart/form-data" style="margin-top:12px;">
-        <input type="hidden" name="action" value="carregar">
-        <label>Link fixo da planilha</label>
-        <input type="url" value="{{ sheet_url }}" readonly style="opacity:0.75;">
-        <small>O link é fixo no sistema. Para trocar, altere no código (DEFAULT_SHEET_URL).</small>
-        <div class="grid" style="margin-top:10px;">
-          <div>
-            <label for="desconto_padrao">Desconto à vista padrão (%)</label>
-            <input type="number" step="0.01" id="desconto_padrao" name="desconto_padrao" value="{{ '%.2f'|format(desconto_padrao or 12.0) }}">
-          </div>
-          <div style="display:flex; align-items:flex-end;">
-            <button type="submit">Recarregar produtos</button>
-          </div>
-        </div>
-      </form>
-    </details>
-
-    {% if rows and rows|length > 0 %}
-      <form action="{{ url_for('home') }}" method="POST" class="card" id="calcForm">
-        <input type="hidden" name="action" value="calcular">
-        <div class="row header">
-          <div></div>
-          <div>Produto (MODELO)</div>
-          <div>Cartão (R$)</div>
-          <div>À vista (padrão)</div>
-          <div>10x s/ juros</div>
-        </div>
-        <div class="rows" id="rows">
-          {% for r in rows %}
-            {% set avista = (r['preco_cartao'] * (1 - (desconto_padrao or 12.0)/100.0)) %}
-            <div class="row">
-              <div>
-                <input type="radio" name="item_json" value='{{ r | tojson }}' {% if loop.first %}checked{% endif %}>
-              </div>
-              <div>{{ r['produto'] }}</div>
-              <div>R$ {{ '%.2f'|format(r['preco_cartao']) }}</div>
-              <div>R$ {{ '%.2f'|format(avista) }}</div>
-              <div>R$ {{ '%.2f'|format(r['preco_cartao']/10.0) }}</div>
-            </div>
-          {% endfor %}
-        </div>
-
-        <div class="grid" style="margin-top:12px; align-items:end;">
-          <div>
-            <label for="frete">Frete (R$)</label>
-            <input type="text" id="frete" name="frete" placeholder="0,00" value="{{ '%.2f'|format(frete or 0) }}">
-          </div>
-          <div>
-            <label for="desconto">Desconto à vista (%)</label>
-            <input type="number" step="0.01" id="desconto" name="desconto" value="{{ '%.2f'|format(desconto_padrao or 12.0) }}">
-          </div>
-        </div>
-
-        <div style="display:flex; gap:12px; align-items:center; margin-top:10px;">
-          <button type="submit" class="copy-btn">CALCULAR</button>
-        </div>
-      </form>
-    {% else %}
-      <div class="card"><p>Nenhum produto foi carregado da planilha. Verifique o link ou clique em "Recarregar produtos" nas Configurações.</p></div>
-    {% endif %}
-
-    <div class="card">
-      <h2>Foto do produto</h2>
-      <div id="fotoArea">
-        {% if selected_foto %}
-          <img id="prodFoto" class="foto" src="{{ selected_foto }}" alt="Foto do produto">
-          <div class="btnrow">
-            <button type="button" onclick="copyImage('prodFoto')">📋 Copiar imagem</button>
-            <a id="downloadLink" href="{{ selected_foto }}" download="produto.jpg">
-              <button type="button">⬇️ Baixar</button>
-            </a>
-          </div>
-        {% else %}
-          <p>Sem foto</p>
-        {% endif %}
       </div>
+
+      <div class="card bg-black border-secondary-subtle mb-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h6 m-0">Produtos</h2>
+            <button id="btnRecarregar" class="btn btn-outline-light btn-sm">Recarregar</button>
+          </div>
+          <div class="table-responsive" style="max-height:420px;overflow:auto;">
+            <table class="table table-dark table-hover align-middle mb-0" id="tblProdutos">
+              <thead class="table-secondary text-dark">
+                <tr>
+                  <th style="width:40px;"></th>
+                  <th>Produto (MODELO)</th>
+                  <th class="text-end">Cartão (R$)</th>
+                  <th class="text-end">À vista (padrão)</th>
+                  <th class="text-end">10x s/ juros</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card bg-black border-secondary-subtle mb-3">
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Frete (R$)</label>
+              <input id="frete" class="form-control" placeholder="0,00">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Desconto à vista (%)</label>
+              <input id="desconto" class="form-control" value="12,00">
+            </div>
+            <div class="col-12 col-md-4 d-flex align-items-end">
+              <button id="btnCalcular" class="btn btn-primary w-100">CALCULAR</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="resultado" class="d-none">
+        <div class="card bg-black border-secondary-subtle mb-3">
+          <div class="card-body">
+            <h5 class="h6 mb-3">Resultados (imagem + mensagem)</h5>
+            <div class="table-responsive">
+              <table class="table table-dark align-middle" id="tblResultados">
+                <thead class="table-secondary text-dark">
+                  <tr>
+                    <th style="width:380px;">Imagem</th>
+                    <th>Mensagem</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
-    {% if generated_text %}
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <h2>Texto gerado</h2>
-          {% if frete_zero_flag %}<span class="badge">Frete informado: R$ 0,00</span>{% endif %}
-        </div>
-        <textarea readonly id="texto">{{ generated_text }}</textarea>
-        <button onclick="copyText()" class="copy-btn">📋 Copiar texto</button>
-      </div>
-    {% endif %}
+    <script>
+      function brReal(v){ return "R$ " + (v||0).toFixed(2).replace(".", ","); }
+      function parsePct(v){ return parseFloat(String(v).replace(",", ".") || "0") || 0; }
+      function parseBR(v){ return parseFloat(String(v).replace(".", "").replace(",", ".") || "0") || 0; }
 
-  </div>
+      let produtos = [];
 
-  <script>
-    function copyText() {
-      const ta = document.getElementById('texto');
-      if (!ta) return;
-      ta.select();
-      ta.setSelectionRange(0, 99999);
-      document.execCommand('copy');
-      alert('Texto copiado!');
-    }
-
-    async function copyImage(imgId) {
-      const img = document.getElementById(imgId);
-      try {
-        const resp = await fetch(img.src, {mode: 'no-cors'}); // tentativa simples
-        const blob = await resp.blob();
-        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-        alert('Imagem copiada!');
-      } catch (e) {
-        alert('Caso não copie automaticamente por política do site da imagem, use "Baixar" e cole manualmente no WhatsApp.');
+      async function carregarUFs(){
+        const selUF = document.getElementById("ufSelect");
+        const msg = document.getElementById("ufMsg");
+        try{
+          msg.textContent = "Carregando UFs...";
+          const r = await fetch("/api/ufs");
+          const data = await r.json();
+          if(!data.ok) throw new Error();
+          selUF.innerHTML = '<option value="">Selecione...</option>' + data.ufs.map(u=>`<option value="${u}">${u}</option>`).join("");
+          msg.textContent = "";
+          selUF.addEventListener("change", async (ev)=>{
+            const uf = ev.target.value; if(!uf) return;
+            try{
+              msg.textContent = "Buscando frete...";
+              const rr = await fetch(`/api/frete?uf=${encodeURIComponent(uf)}`);
+              const dj = await rr.json();
+              if(!dj.ok){ msg.textContent = dj.error || "Erro ao buscar frete."; return; }
+              document.getElementById("frete").value = dj.frete.toFixed(2).replace(".", ",");
+              msg.textContent = `Frete ${uf} aplicado.`;
+            }catch(e){ msg.textContent = "Falha de rede."; }
+          });
+        }catch(e){ msg.textContent = "Não foi possível carregar UFs."; }
       }
-    }
 
-    function setPhoto(url) {
-      const area = document.getElementById('fotoArea');
-      if (!area) return;
-      if (url) {
-        area.innerHTML = `
-          <img id="prodFoto" class="foto" src="${url}" alt="Foto do produto">
-          <div class="btnrow">
-            <button type="button" onclick="copyImage('prodFoto')">📋 Copiar imagem</button>
-            <a id="downloadLink" href="${url}" download="produto.jpg">
-              <button type="button">⬇️ Baixar</button>
-            </a>
-          </div>`;
-      } else {
-        area.innerHTML = "<p>Sem foto</p>";
+      async function carregarProdutos(){
+        const tb = document.querySelector("#tblProdutos tbody");
+        tb.innerHTML = '<tr><td colspan="5" class="text-center text-secondary">Carregando...</td></tr>';
+        const r = await fetch("/api/produtos"); const data = await r.json();
+        if(!data.ok){ tb.innerHTML = `<tr><td colspan="5" class="text-danger">${data.error||"Erro"}</td></tr>`; return; }
+        produtos = data.items || [];
+        if(!produtos.length){ tb.innerHTML = '<tr><td colspan="5" class="text-warning">Nenhum produto na planilha.</td></tr>'; return; }
+        tb.innerHTML = produtos.map((p,idx)=>`<tr>
+          <td><input type="checkbox" name="pSel" value="${idx}"></td>
+          <td>${p.modelo}</td>
+          <td class="text-end">${p.cartao!=null?brReal(p.cartao):"-"}</td>
+          <td class="text-end">${p.avista!=null?brReal(p.avista):"-"}</td>
+          <td class="text-end">${p.parcela10!=null?brReal(p.parcela10):"-"}</td>
+        </tr>`).join("");
       }
-    }
-    document.addEventListener('change', (e) => {
-      if (e.target && e.target.name === 'item_json') {
-        try {
-          const data = JSON.parse(e.target.value);
-          setPhoto(data.foto || null);
-        } catch {}
+
+      function textoProduto(p, desconto){
+        const cartao = p.cartao || 0;
+        const parcela10 = p.parcela10 || (cartao/10);
+        const precoComDesc = cartao * (1 - (desconto/100));
+        const titulo = p.modelo.toUpperCase();
+        // Sem linhas em branco extras:
+        return [
+          "*VALOR JÁ INCLUSO O FRETE*",
+          `*${titulo}*`,
+          brReal(cartao),
+          `até 10x de ${brReal(parcela10)} sem juros`,
+          "ou",
+          `*PROMOÇÃO: ${brReal(precoComDesc)} no pix já com ${desconto.toFixed(2)}% de desconto*`
+        ].join("\n");
       }
-    });
-  </script>
-</body>
+
+      function gerarTabela(){
+        const frete = parseBR(document.getElementById("frete").value || "0"); // mantido para futura composição se desejar
+        const desconto = parsePct(document.getElementById("desconto").value || "12");
+        const selecionados = [...document.querySelectorAll('input[name="pSel"]:checked')].map(cb=>parseInt(cb.value,10));
+        if(!selecionados.length){ alert("Selecione pelo menos um produto."); return; }
+
+        const tbody = document.querySelector("#tblResultados tbody");
+        tbody.innerHTML = "";
+        selecionados.forEach(idx=>{
+          const p = produtos[idx];
+          const texto = textoProduto(p, desconto);
+          const tr = document.createElement("tr");
+
+          const tdImg = document.createElement("td");
+          const img = document.createElement("img");
+          img.className = "img-fluid rounded border";
+          img.style.maxWidth = "360px";
+          if(p.img) img.src = p.img;
+          tdImg.appendChild(img);
+          const divDl = document.createElement("div");
+          divDl.className = "mt-2";
+          const a = document.createElement("a");
+          a.className = "btn btn-outline-light btn-sm";
+          a.textContent = "Baixar";
+          if(p.img){ a.href = p.img; a.download = (p.modelo.replace(/[^a-z0-9]/gi,'_').toLowerCase()||'produto') + ".jpg"; }
+          divDl.appendChild(a);
+          tdImg.appendChild(divDl);
+
+          const tdMsg = document.createElement("td");
+          const ta = document.createElement("textarea");
+          ta.className = "form-control";
+          ta.rows = 10;
+          ta.value = texto;
+          tdMsg.appendChild(ta);
+          const divBtns = document.createElement("div");
+          divBtns.className = "mt-2 d-flex gap-2";
+          const btnCopy = document.createElement("button");
+          btnCopy.className = "btn btn-outline-light btn-sm";
+          btnCopy.textContent = "Copiar texto";
+          btnCopy.addEventListener("click", ()=> navigator.clipboard.writeText(ta.value));
+          divBtns.appendChild(btnCopy);
+          tdMsg.appendChild(divBtns);
+
+          tr.appendChild(tdImg);
+          tr.appendChild(tdMsg);
+          tbody.appendChild(tr);
+        });
+
+        document.getElementById("resultado").classList.remove("d-none");
+        // scroll até resultados
+        document.getElementById("resultado").scrollIntoView({behavior:"smooth"});
+      }
+
+      document.addEventListener("DOMContentLoaded", ()=>{
+        carregarUFs();
+        carregarProdutos();
+        document.getElementById("btnRecarregar").addEventListener("click", carregarProdutos);
+        document.getElementById("btnCalcular").addEventListener("click", gerarTabela);
+      });
+    </script>
+  </body>
 </html>

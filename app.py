@@ -1,256 +1,114 @@
-# app.py (v13 - imagem com URL exato da planilha)
-import os, re, json
-from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from urllib.parse import urlparse, parse_qs
-import pandas as pd
-
-from flask import Flask, render_template, request, flash
+# app.py (fix8)
+import csv, io, time, re, requests
+from flask import Flask, render_template, jsonify, request
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 
-DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Ycsc6ksvaO5EwOGq_w-N8awTKUyuo7awwu2IzRNfLVg/edit?pli=1&gid=0#gid=0"
-DEFAULT_DESCONTO = float(os.environ.get("DEFAULT_DESCONTO", 12.0))
+SHEET_ID = "1Ycsc6ksvaO5EwOGq_w-N8awTKUyuo7awwu2IzRNfLVg"
+GID_PROD = "0"
+GID_FRETE = "117017797"
 
-def to_gsheet_export(url: str):
-    parsed = urlparse(url)
-    if "docs.google.com" in parsed.netloc and "/spreadsheets" in parsed.path:
-        m = re.search(r"/spreadsheets/d/([a-zA-Z0-9\-_]+)", parsed.path)
-        gid = None
-        if parsed.fragment:
-            m_gid = re.search(r"gid=(\d+)", parsed.fragment)
-            if m_gid: gid = m_gid.group(1)
-        if gid is None:
-            gid = parse_qs(parsed.query).get("gid", [None])[0]
-        if m:
-            doc_id = m.group(1)
-            base = f"https://docs.google.com/spreadsheets/d/{doc_id}/export"
-            xlsx_url = f"{base}?format=xlsx" + (f"&gid={gid}" if gid else "")
-            csv_url  = f"{base}?format=csv"  + (f"&gid={gid}" if gid else "")
-            return csv_url, xlsx_url
-    return url, url
+def csv_url(sheet_id, gid):
+    return "https://docs.google.com/spreadsheets/d/{}/export?format=csv&gid={}".format(sheet_id, gid)
 
-def brl(value: Decimal) -> str:
-    if not isinstance(value, Decimal):
-        value = Decimal(str(value))
-    value = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    int_part, frac_part = f"{value:.2f}".split(".")
-    int_part_with_sep = ""
-    while len(int_part) > 3:
-        int_part_with_sep = "." + int_part[-3:] + int_part_with_sep
-        int_part = int_part[:-3]
-    int_part_with_sep = int_part + int_part_with_sep
-    return f"R$ {int_part_with_sep},{frac_part}"
+PROD_CSV = csv_url(SHEET_ID, GID_PROD)
+FRETE_CSV = csv_url(SHEET_ID, GID_FRETE)
 
-def parse_price(v):
-    if pd.isna(v): return None
-    if isinstance(v, (int, float)): return float(v)
-    s = str(v).strip().replace(".", "").replace(",", ".")
-    s = re.sub(r"[^0-9\.\-]", "", s)
-    if s in ("", "."): return None
-    try: return float(s)
-    except: return None
+_cache = {"prod":{"ts":0,"rows":[]}, "frete":{"ts":0,"map":{},"ufs":[]}}
 
-def try_header_scan(reader_func):
-    raw = reader_func(header=None)
-    max_rows = min(50, len(raw))
-    for i in range(max_rows):
-        row = raw.iloc[i].fillna("").astype(str).str.strip().str.upper().tolist()
-        if "MODELO" in row and ("CARTÃO" in row or "CARTAO" in row):
-            headers = raw.iloc[i].tolist()
-            df = raw.iloc[i+1:].copy()
-            df.columns = headers
-            return df
-    return None
+EXPECTED_UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA",
+                "PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"]
 
-def _extract_image_url(cell_val: str):
-    if not cell_val: 
-        return None
-    s = str(cell_val).strip()
-    if s == "" or s.lower() == "nan":
-        return None
-    m = re.search(r'(?i)\bimage\s*\(\s*"([^"]+)"', s)
-    if m:
-        return m.group(1)
-    if s.startswith("http://") or s.startswith("https://"):
-        return s
-    return None
-
-def _read_df(csv_u, xlsx_u):
-    errors = []
-    for candidate, reader in [(xlsx_u, pd.read_excel), (csv_u, pd.read_csv)]:
-        if not candidate: continue
-        try:
-            df = reader(candidate)
-            return df, errors
-        except Exception as e:
-            errors.append(str(e))
-    return None, errors
-
-def normalize_and_extract(df, csv_u=None, xlsx_u=None):
-    cols_upper = [str(c).strip().upper() for c in df.columns]
-    if not ("MODELO" in cols_upper and (("CARTÃO" in cols_upper) or ("CARTAO" in cols_upper))):
-        scanned = None
-        if xlsx_u:
-            try:
-                scanned = try_header_scan(lambda **kw: pd.read_excel(xlsx_u, **kw))
-            except Exception:
-                scanned = None
-        if scanned is None and csv_u:
-            try:
-                scanned = try_header_scan(lambda **kw: pd.read_csv(csv_u, **kw))
-            except Exception:
-                scanned = None
-        if scanned is not None:
-            df = scanned
-
-    rename_map = {}
-    for c in df.columns:
-        u = str(c).strip().upper()
-        if u == "MODELO":
-            rename_map[c] = "Produto"
-        if u in ("CARTÃO","CARTAO"):
-            rename_map[c] = "PrecoCartao"
-        if u in ("A VISTA","À VISTA","AVISTA"):
-            rename_map[c] = "AvistaSheet"
-        if u in ("LINK","URL","URL FOTO","FOTO LINK","IMAGEM","IMAGE URL"):
-            rename_map[c] = "FotoLink"
-        if u == "FOTO" and "FotoLink" not in rename_map.values():
-            rename_map[c] = "FotoFallback"
-    df = df.rename(columns=rename_map)
-
-    if "FotoLink" not in df.columns and len(df.columns) >= 9:
-        i_col_name = df.columns[8]
-        df = df.rename(columns={i_col_name: "FotoLink"})
-
-    if "Produto" not in df.columns or "PrecoCartao" not in df.columns:
-        raise ValueError("Não encontrei as colunas MODELO e CARTÃO na planilha.")
-
-    return df
-
-def load_sheet_exact(sheet_url: str):
-    csv_u, xlsx_u = to_gsheet_export(sheet_url.strip())
-    df, errs = _read_df(csv_u, xlsx_u)
-    if df is None:
-        raise ValueError("Falha ao ler a planilha online. " + "\n".join(errs[-2:]))
-
-    df = normalize_and_extract(df, csv_u=csv_u, xlsx_u=xlsx_u)
-
-    df["PrecoCartaoNum"] = df["PrecoCartao"].apply(parse_price)
-    df = df.dropna(subset=["PrecoCartaoNum"])
-    df = df[df["Produto"].astype(str).str.strip().str.upper().ne("MODELO")]
-    df = df[df["Produto"].astype(str).str.strip().str.upper().ne("CÓDIGO")]
-    df = df[df["Produto"].astype(str).str.strip().str.len() > 0]
-
-    rows = []
-    for _, r in df.iterrows():
-        foto_val = r.get("FotoLink", None)
-        if (foto_val is None or str(foto_val).strip() == "") and "FotoFallback" in df.columns:
-            foto_val = r.get("FotoFallback", None)
-        foto_url = _extract_image_url(foto_val) if foto_val is not None else None
-        rows.append({
-            "produto": str(r["Produto"]).strip(),
-            "preco_cartao": float(r["PrecoCartaoNum"]),
-            "foto": foto_url
-        })
-    if not rows:
-        raise ValueError("Achei a planilha, mas não consegui interpretar os preços do cartão.")
-    return rows
-
-def parse_decimal_or_zero(s: str) -> Decimal:
-    try:
-        if s is None: 
-            return Decimal("0")
-        s = str(s).strip().replace(".", "").replace(",", ".")
-        if s == "" or s == ".":
-            return Decimal("0")
-        return Decimal(s)
-    except (InvalidOperation, ValueError):
-        return Decimal("0")
-
-@app.route("/", methods=["GET", "POST"])
-def home():
-    desconto_param = request.args.get("desconto", "")
-    try:
-        desconto_default = float(desconto_param.replace(",", ".")) if desconto_param else DEFAULT_DESCONTO
+def norm(s): return (s or "").strip()
+def to_float_br(x):
+    if x is None: return None
+    t = str(x).strip()
+    if not t: return None
+    t = t.replace("R$","").replace(" ","").replace(".", "").replace(",", ".")
+    try: return float(t)
     except:
-        desconto_default = DEFAULT_DESCONTO
+        m = re.search(r"([0-9]+[\.,]?[0-9]*)", str(x))
+        if m:
+            txt = m.group(1).replace(".","").replace(",",".")
+            try: return float(txt)
+            except: pass
+        return None
 
-    rows = []
-    selected_foto = None
-    frete_zero_flag = False
+def fetch_csv_rows(url):
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    txt = r.content.decode("utf-8", errors="ignore")
+    return list(csv.reader(io.StringIO(txt)))
 
-    if request.method == "POST":
-        action = request.form.get("action")
-        if action == "carregar":
-            desconto_padrao = request.form.get("desconto_padrao", str(desconto_default)).strip()
-            try:
-                desconto_default = float(desconto_padrao.replace(",", "."))
-            except:
-                pass
-            try:
-                rows = load_sheet_exact(DEFAULT_SHEET_URL)
-                if not rows:
-                    flash("Nenhum produto encontrado. Verifique a planilha.", "error")
-            except Exception as e:
-                flash(str(e), "error")
-                rows = []
-            selected_foto = rows[0].get("foto") if rows else None
-            return render_template("index.html", sheet_url=DEFAULT_SHEET_URL, desconto_padrao=desconto_default, rows=rows, selected_foto=selected_foto, frete_zero_flag=frete_zero_flag)
+def is_header_row_candidato(row):
+    labels = {norm(x).lower() for x in row[:9]}
+    return any(x in labels for x in ["código","codigo","modelo","a vista","à vista","cartão","cartao","parcela em 10x","link"])
 
-        elif action == "calcular":
-            desconto_default = float(request.form.get("desconto", desconto_default))
-            data = json.loads(request.form.get("item_json", "{}"))
-            produto = str(data.get("produto", "Produto"))
-            preco_cartao = Decimal(str(data.get("preco_cartao", "0")))
-            selected_foto = data.get("foto") or None
-            frete = parse_decimal_or_zero(request.form.get("frete", "0"))
+def load_produtos():
+    now = time.time()
+    if now - _cache["prod"]["ts"] < 300 and _cache["prod"]["rows"]:
+        return _cache["prod"]["rows"]
+    rows = fetch_csv_rows(PROD_CSV)
+    out = []
+    if rows:
+        for r in rows[1:]:
+            if len(r) < 6:
+                continue
+            if is_header_row_candidato(r):
+                continue
+            modelo = norm(r[2])      # C
+            avista = to_float_br(r[3])  # D
+            cartao = to_float_br(r[4])  # E
+            parcela10 = to_float_br(r[5])  # F
+            img = norm(r[8]) if len(r) > 8 else ""  # I
+            if not modelo:
+                continue
+            out.append({"modelo": modelo, "avista": avista, "cartao": cartao, "parcela10": parcela10, "img": img})
+    _cache["prod"] = {"ts": now, "rows": out}
+    return out
 
-            frete_zero_flag = (frete == Decimal("0"))
+def load_frete_map():
+    now = time.time()
+    if now - _cache["frete"]["ts"] < 1800 and _cache["frete"]["map"]:
+        return _cache["frete"]["map"], _cache["frete"]["ufs"]
+    rows = fetch_csv_rows(FRETE_CSV)
+    mp, ufs = {}, []
+    if rows:
+        for r in rows[1:]:
+            if len(r) < 3: continue
+            uf = norm(r[1]).upper().replace(" ", "").replace("-", "")  # B
+            val = to_float_br(r[2])  # C
+            if len(uf)==2 and val is not None:
+                mp[uf] = val
+                if uf not in ufs: ufs.append(uf)
+    if not ufs: ufs = EXPECTED_UFS
+    _cache["frete"] = {"ts": now, "map": mp, "ufs": sorted(ufs)}
+    return mp, sorted(ufs)
 
-            desconto = Decimal(str(desconto_default)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            total_cartao = (preco_cartao + frete).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            parcela_10x = (total_cartao / Decimal("10")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            avista = (preco_cartao * (Decimal("100") - desconto) / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            promo_pix = (avista + frete).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+@app.get("/")
+def index():
+    return render_template("index.html")
 
-            desconto_str = f"{desconto:.2f}"
-            lines = [
-                "*VALOR JÁ INCLUSO O FRETE*",
-                f"*{produto.upper()}*",
-                f"{brl(total_cartao)}",
-                f"até 10x de {brl(parcela_10x)} sem juros",
-                "",
-                "ou",
-                "",
-                f"*PROMOÇÃO: {brl(promo_pix)} no pix já com {desconto_str}% de desconto*"
-            ]
-            msg = "\n".join(lines)
-
-            try:
-                rows = load_sheet_exact(DEFAULT_SHEET_URL)
-            except Exception as e:
-                flash(str(e), "error")
-                rows = []
-
-            return render_template("index.html",
-                                   sheet_url=DEFAULT_SHEET_URL,
-                                   desconto_padrao=float(desconto),
-                                   rows=rows,
-                                   generated_text=msg,
-                                   frete=0.0,
-                                   selected_foto=selected_foto,
-                                   frete_zero_flag=frete_zero_flag)
-
-    # GET
+@app.get("/api/produtos")
+def api_produtos():
     try:
-        rows = load_sheet_exact(DEFAULT_SHEET_URL)
+        return jsonify({"ok": True, "items": load_produtos()})
     except Exception as e:
-        flash(str(e), "error")
-        rows = []
-    selected_foto = rows[0].get("foto") if rows else None
+        return jsonify({"ok": False, "error": str(e)}), 500
 
-    return render_template("index.html", sheet_url=DEFAULT_SHEET_URL, desconto_padrao=desconto_default, rows=rows, selected_foto=selected_foto, frete_zero_flag=frete_zero_flag)
+@app.get("/api/ufs")
+def api_ufs():
+    _, ufs = load_frete_map()
+    return jsonify({"ok": True, "ufs": ufs})
+
+@app.get("/api/frete")
+def api_frete():
+    uf = norm(request.args.get("uf")).upper().replace(" ", "").replace("-", "")
+    if not uf: return jsonify({"ok": False, "error":"UF não informada"}), 400
+    mp, _ = load_frete_map()
+    v = mp.get(uf)
+    if v is None: return jsonify({"ok": False, "error": "UF '{}' não encontrada".format(uf)}), 404
+    return jsonify({"ok": True, "uf": uf, "frete": v})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True)

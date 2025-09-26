@@ -1,114 +1,77 @@
-# app.py (fix8)
-import csv, io, time, re, requests
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify
+import requests, csv, io
 
 app = Flask(__name__)
 
-SHEET_ID = "1Ycsc6ksvaO5EwOGq_w-N8awTKUyuo7awwu2IzRNfLVg"
-GID_PROD = "0"
-GID_FRETE = "117017797"
+URL_PROD = "https://docs.google.com/spreadsheets/d/1Ycsc6ksvaO5EwOGq_w-N8awTKUyuo7awwu2IzRNfLVg/export?format=csv&gid=0"
+URL_FRETE = "https://docs.google.com/spreadsheets/d/1Ycsc6ksvaO5EwOGq_w-N8awTKUyuo7awwu2IzRNfLVg/export?format=csv&gid=117017797"
 
-def csv_url(sheet_id, gid):
-    return "https://docs.google.com/spreadsheets/d/{}/export?format=csv&gid={}".format(sheet_id, gid)
-
-PROD_CSV = csv_url(SHEET_ID, GID_PROD)
-FRETE_CSV = csv_url(SHEET_ID, GID_FRETE)
-
-_cache = {"prod":{"ts":0,"rows":[]}, "frete":{"ts":0,"map":{},"ufs":[]}}
-
-EXPECTED_UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA",
-                "PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"]
-
-def norm(s): return (s or "").strip()
-def to_float_br(x):
-    if x is None: return None
-    t = str(x).strip()
-    if not t: return None
-    t = t.replace("R$","").replace(" ","").replace(".", "").replace(",", ".")
-    try: return float(t)
-    except:
-        m = re.search(r"([0-9]+[\.,]?[0-9]*)", str(x))
-        if m:
-            txt = m.group(1).replace(".","").replace(",",".")
-            try: return float(txt)
-            except: pass
-        return None
-
-def fetch_csv_rows(url):
-    r = requests.get(url, timeout=30)
+def fetch_rows(url):
+    r = requests.get(url, timeout=25)
     r.raise_for_status()
-    txt = r.content.decode("utf-8", errors="ignore")
-    return list(csv.reader(io.StringIO(txt)))
+    text = r.content.decode("utf-8", errors="ignore").replace("\r\n","\n").replace("\r","\n")
+    return list(csv.reader(io.StringIO(text)))
 
-def is_header_row_candidato(row):
-    labels = {norm(x).lower() for x in row[:9]}
-    return any(x in labels for x in ["código","codigo","modelo","a vista","à vista","cartão","cartao","parcela em 10x","link"])
+def to_float_brl(s):
+    s = (s or "").strip()
+    if not s: return 0.0
+    s = s.replace("R$","").replace(".","").replace(",",".")
+    try: return float(s)
+    except: return 0.0
 
-def load_produtos():
-    now = time.time()
-    if now - _cache["prod"]["ts"] < 300 and _cache["prod"]["rows"]:
-        return _cache["prod"]["rows"]
-    rows = fetch_csv_rows(PROD_CSV)
-    out = []
-    if rows:
-        for r in rows[1:]:
-            if len(r) < 6:
-                continue
-            if is_header_row_candidato(r):
-                continue
-            modelo = norm(r[2])      # C
-            avista = to_float_br(r[3])  # D
-            cartao = to_float_br(r[4])  # E
-            parcela10 = to_float_br(r[5])  # F
-            img = norm(r[8]) if len(r) > 8 else ""  # I
-            if not modelo:
-                continue
-            out.append({"modelo": modelo, "avista": avista, "cartao": cartao, "parcela10": parcela10, "img": img})
-    _cache["prod"] = {"ts": now, "rows": out}
-    return out
-
-def load_frete_map():
-    now = time.time()
-    if now - _cache["frete"]["ts"] < 1800 and _cache["frete"]["map"]:
-        return _cache["frete"]["map"], _cache["frete"]["ufs"]
-    rows = fetch_csv_rows(FRETE_CSV)
-    mp, ufs = {}, []
-    if rows:
-        for r in rows[1:]:
-            if len(r) < 3: continue
-            uf = norm(r[1]).upper().replace(" ", "").replace("-", "")  # B
-            val = to_float_br(r[2])  # C
-            if len(uf)==2 and val is not None:
-                mp[uf] = val
-                if uf not in ufs: ufs.append(uf)
-    if not ufs: ufs = EXPECTED_UFS
-    _cache["frete"] = {"ts": now, "map": mp, "ufs": sorted(ufs)}
-    return mp, sorted(ufs)
-
-@app.get("/")
+@app.route("/")
 def index():
     return render_template("index.html")
 
-@app.get("/api/produtos")
+@app.route("/api/produtos")
 def api_produtos():
-    try:
-        return jsonify({"ok": True, "items": load_produtos()})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    rows = fetch_rows(URL_PROD)
+    if len(rows) < 5:
+        return jsonify(ok=False, error="CSV de produtos vazio")
+    header = [c.strip().upper() for c in rows[3]]  # linha 4
+    def col(name, fb):
+        try: return header.index(name)
+        except ValueError: return fb
 
-@app.get("/api/ufs")
-def api_ufs():
-    _, ufs = load_frete_map()
-    return jsonify({"ok": True, "ufs": ufs})
+    # Mapeamento conforme sua planilha
+    i_modelo   = col("MODELO", 2)           # C
+    i_avista   = col("A VISTA", 3)          # D
+    i_cartao   = col("CARTÃO", 4)           # E
+    i_10x      = col("PARCELA EM 10X", 5)   # F
+    i_ind      = col("INDICADA", 6)         # G
+    # imagem exatamente como na coluna I (URL completa .webp)
+    i_img      = 8                          # I
 
-@app.get("/api/frete")
-def api_frete():
-    uf = norm(request.args.get("uf")).upper().replace(" ", "").replace("-", "")
-    if not uf: return jsonify({"ok": False, "error":"UF não informada"}), 400
-    mp, _ = load_frete_map()
-    v = mp.get(uf)
-    if v is None: return jsonify({"ok": False, "error": "UF '{}' não encontrada".format(uf)}), 404
-    return jsonify({"ok": True, "uf": uf, "frete": v})
+    data = []
+    for r in rows[4:]:  # a partir da linha 5
+        if len(r) < 9: r += [""]*(9-len(r))
+        nome = (r[i_modelo] or "").strip()
+        if not nome: continue
+        produto = {
+            "produto": nome,
+            "cartao": to_float_brl(r[i_cartao]),
+            "avista": to_float_brl(r[i_avista]),
+            "dezx": to_float_brl(r[i_10x]),
+            "indicada": r[i_ind],
+            "imagem": (r[i_img] or "").strip(),  # usar exatamente a URL da coluna I
+        }
+        data.append(produto)
+    return jsonify(ok=True, data=data)
+
+@app.route("/api/fretes")
+def api_fretes():
+    rows = fetch_rows(URL_FRETE)
+    out = []
+    start = 4  # linha 5
+    uf_col = 1 # B
+    val_col = 2 # C
+    for r in rows[start:]:
+        if len(r) <= uf_col: continue
+        uf = (r[uf_col] or '').strip()
+        if not uf: continue
+        val = to_float_brl(r[val_col] if len(r)>val_col else '0')
+        out.append({"uf": uf, "valor": val})
+    return jsonify(ok=True, data=out)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(host="127.0.0.1", port=5001, debug=True)

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Configurações - ApoioV</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Configurações</h1>
+    <form id="form">
+        <label>Link da planilha</label>
+        <input type="text" id="sheet_url" value="{{ config.sheet_url }}">
+        <label>Nome da aba</label>
+        <input type="text" id="sheet_name" value="{{ config.sheet_name }}">
+        <label>GID</label>
+        <input type="text" id="gid" value="{{ config.gid }}">
+        <button type="submit">Salvar</button>
+    </form>
+
+    <script>
+    document.getElementById("form").onsubmit = async (e) => {
+        e.preventDefault();
+        const payload = {
+            sheet_url: document.getElementById("sheet_url").value,
+            sheet_name: document.getElementById("sheet_name").value,
+            gid: document.getElementById("gid").value
+        };
+        await fetch("/api/save_config", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+        alert("Configurações salvas!");
+    };
+    </script>
+</body>
+</html>
